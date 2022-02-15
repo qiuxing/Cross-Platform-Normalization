@@ -1,3 +1,13 @@
+## numerically robust matrix inverse
+rsolve <- function(mat, d.prop=1e-4, dmin=1e-6, dmax=1e6){
+  o <- svd(mat)
+  ## singular value threshold
+  thresh <- min(max(sum(o$d) * d.prop, dmin), dmax)
+  inv.mat <- o$v %*% diag(1/(pmax(o$d, thresh))) %*% t(o$u)
+  return(inv.mat)
+}
+
+
 # Per-gene OLS model
 #'@param X gene expression matrix
 #'@param Y gene expression matrix
@@ -84,7 +94,7 @@ flmer <- function(Xmat, Ymat){
   Wxx <- Axx/(1+lambdahat*Axx)
   Wxy <- Axy / (1+lambdahat*Axx)
   ## Now the actual estimation
-  covBeta <- var.epsilon * solve(matrix(c(sum(W11), sum(W1x), sum(W1x), sum(Wxx)), 2))
+  covBeta <- var.epsilon * rsolve(matrix(c(sum(W11), sum(W1x), sum(W1x), sum(Wxx)), 2))
   betahat <- drop(covBeta %*% c(sum(W1y), sum(Wxy)) / var.epsilon)
   names(betahat) <- c("Intercept", "Slope")
   dimnames(covBeta) <- list(c("Intercept", "Slope"), c("Intercept", "Slope"))
