@@ -26,6 +26,7 @@ OLS <- function(X, Y, min.var=1e-3){
   varXmin <- max(quantile(VarX, 0.05)/10, min.var)
   lowXvar <- which(VarX<varXmin)
   VarX[lowXvar] <- varXmin
+  if (length(lowXvar) > nrow(X)/5) warning(paste0("There are many (n=", length(lowXvar), ") genes with very low sample variance on platform X. Please consider running a nonspecific filtering before applying MatchMixerR."))
   ## CovXY[lowXvar] <- varXmin #so that beta1=1 when VarX is too small
   ## regression coefs.
   beta1 <- CovXY / VarX
