@@ -1,0 +1,13 @@
+importFrom("graphics", "lines", "par", "plot", "title")
+importFrom("stats", "cor", "cov", "density", "dnorm", "median",
+           "qqline", "qqnorm", "qqplot", "rgamma", "rnorm", "var")
+
+export(rsolve)
+export(MM)
+export(OLS)
+export(dwd)
+export(eb)
+export(flmer)
+export(gq)
+export(xpn)
+useDynLib(MatchMixeR,ckmeans_c)
