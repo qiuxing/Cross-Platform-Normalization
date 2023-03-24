@@ -1,7 +1,7 @@
 Package: MatchMixeR
 Type: Package
-Title: MatchMixeR: a cross-platform normalization tool
-Version: 0.1.1
+Title: MatchMixeR: A Cross-Platform Normalization Tool for High-throughput Data
+Version: 0.1.2
 Author: Serin Zhang, Xing Qiu, Jinfeng Zhang
 Maintainer: Serin Zhang <serin20@gmail.com>
 Description: A matched sample based mixed effect regression model for cross-platform normalization

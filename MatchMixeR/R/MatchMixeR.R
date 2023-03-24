@@ -7,77 +7,96 @@ rsolve <- function(mat, d.prop=1e-4, dmin=1e-6, dmax=1e6){
   return(inv.mat)
 }
 
-
 # Per-gene OLS model
 #'@param X gene expression matrix
 #'@param Y gene expression matrix
-OLS <- function(X, Y){
+## this is the robust version of OLS
+OLS <- function(X, Y, min.var=1e-3){
+  n <- ncol(X)
   ## A fast row-wise univariate OLS regression based on linear algebra
-  Xbar <- rowMeans(X); Ybar <- rowMeans(Y, na.rm = TRUE)
+  Xbar <- rowMeans(X, na.rm=TRUE); Ybar <- rowMeans(Y, na.rm = TRUE)
   X.c <- sweep(X, 1, Xbar); Y.c <- sweep(Y, 1, Ybar)
-  CovXY <- rowSums(X.c * Y.c, na.rm = TRUE)
-  VarX <- rowSums(X.c^2, na.rm = TRUE); VarY <- rowSums(Y.c^2, na.rm = TRUE)
-  ## regression coefs.
-  beta1 <- CovXY / VarX; beta0 <- Ybar - beta1 * Xbar
-  betamat <- cbind("Intercept"=beta0, "Slope"=beta1)
-  ## Pearson corr. coefs.
+  CovXY <- rowSums(X.c * Y.c, na.rm = TRUE)/(n-1)
+  negCor <- which(CovXY<0)
+  VarX <- rowSums(X.c^2, na.rm = TRUE)/(n-1)
+  VarY <- rowSums(Y.c^2, na.rm = TRUE)/(n-1)
+  ## Pearson corr. coefs. It is OK to have N/As
   cc <- CovXY / sqrt(VarX * VarY)
+  ## robust variances
+  varXmin <- max(quantile(VarX, 0.05)/10, min.var)
+  lowXvar <- which(VarX<varXmin)
+  VarX[lowXvar] <- varXmin
+  ## CovXY[lowXvar] <- varXmin #so that beta1=1 when VarX is too small
+  ## regression coefs.
+  beta1 <- CovXY / VarX
+  beta0 <- Ybar - beta1 * Xbar
+  betamat <- cbind("Intercept"=beta0, "Slope"=beta1)
   ## predictions
   Yhat <- sweep(X, 1, beta1, FUN="*") + beta0 %o% rep(1, ncol(X))
   ## RSS vector
-  RSS <- rowSums((Y - Yhat)^2)
-  SS1 <- rowSums(Yhat^2)
-  SST <- rowSums(Y^2)
-  return(list(betamat=betamat, corr=cc, covxy=CovXY, varx=VarX, Yhat=Yhat, RSS=RSS, var.explained.prop=SS1/SST, Xbar=Xbar, Ybar=Ybar))
+  RSS <- rowMeans((Y - Yhat)^2, na.rm=TRUE)
+  SS1 <- rowMeans(Yhat^2, na.rm=TRUE)
+  SST <- rowMeans(Y^2, na.rm=TRUE)
+  var.prop <- SS1/SST; var.prop[SS1==0] <- 0
+  ## trouble maker genes
+  problematic.genes <- list(lowXvar=lowXvar, negCor=negCor)
+  return(list(betamat=betamat, corr=cc, covxy=CovXY, varx=VarX, Yhat=Yhat, RSS=RSS, var.explained.prop=var.prop, Xbar=Xbar, Ybar=Ybar, problematic.genes=problematic.genes))
 }
 
-## The main cross-platform normalization procedure: FLMER is based on
+## The main engine of cross-platform normalization procedure: FLMER is based on
 ## the proposed moment-based method
 #'@param X gene expression matrix
 #'@param Y gene expression matrix
 #'@export
-flmer <- function(Xmat, Ymat){
+flmer <- function(Xmat, Ymat, min.var=1e-3){
   Xmat <- as.matrix(Xmat); Ymat <- as.matrix(Ymat)
   ## 11/12/2018. Use new notations; p==ngenes; n==sample size
   p <- nrow(Xmat); n <- ncol(Xmat); N <- p*n
   ## calculate some useful items
-  Xibar <- rowMeans(Xmat); Xbar <- mean(Xibar)
+  Xibar <- rowMeans(Xmat,na.rm=TRUE); Xbar <- mean(Xibar)
   Xmat.c <- Xmat - Xibar
-  Yibar <- rowMeans(Ymat); Ybar <- mean(Yibar)
+  Yibar <- rowMeans(Ymat,na.rm=TRUE); Ybar <- mean(Yibar)
   Ymat.c <- Ymat - Yibar
-  covXY <- rowSums(Xmat.c * Ymat.c)
-  covXX <- rowSums(Xmat.c * Xmat.c)
-  beta.yixi <- covXY / covXX
+  covXY <- rowSums(Xmat.c * Ymat.c, na.rm=TRUE)
+  VarX <- rowSums(Xmat.c * Xmat.c, na.rm=TRUE)
+  ## robust variances
+  varXmin <- max(quantile(VarX, 0.05)/10, min.var)
+  lowXvar <- which(VarX<varXmin)
+  VarX[lowXvar] <- varXmin
+  beta.yixi <- covXY / VarX
   ## The overall regression
-  Xc <- Xmat - mean(Xmat); Yc <- Ymat - mean(Ymat)
-  beta.yx <- sum(Xc*Yc) / sum(Xc^2)
+  Xc <- Xmat - mean(Xmat, na.rm=TRUE); Yc <- Ymat - mean(Ymat, na.rm=TRUE)
+  VarX.overall <- max(sum(Xc^2, na.rm=TRUE), varXmin)
+  beta.yx <- sum(Xc*Yc, na.rm=TRUE) / VarX.overall
   ## In this case, we assume  that there is no collinearity in Z
   qprime <- 2*p
-  var.epsilon <- sum((Ymat.c - Xmat.c * beta.yixi)^2) / (N - qprime)
+  var.epsilon <- sum((Ymat.c - Xmat.c * beta.yixi)^2, na.rm=TRUE) / (N - qprime)
+  ## just to ensure that var.epsilon != 0
+  var.epsilon <- max(var.epsilon, min.var)
   ## Preparing for calculating S, \| \mathbf{R}_{Z|\mathbf{X}} \|^2,
   ## and \|Z' \mathbf{R}_{Z|\mathbf{X}} \|^2 terms.
   XiYibar <- covXY/n + Xibar*Yibar
   ## Xi2bar = \|Xi\|^2 / n
-  Xi2bar <- covXX/n + Xibar^2
+  Xi2bar <- VarX/n + Xibar^2
   ## Xs is Xmat standardized by the global mean/sd
-  Xs <- (Xmat - Xbar) / sqrt(sum((Xmat-Xbar)^2))
-  Xsbar <- rowMeans(Xs)
+  Xs <- (Xmat - Xbar) / sqrt(VarX.overall)
+  Xsbar <- rowMeans(Xs, na.rm=TRUE)
   ## XsX is the inner producd between Xs and X. It is denoted as
   ## \varsigma in the notes.
-  XsX <- rowSums(Xs*Xmat)
-  XsNorm2 <- sum(Xs^2)
+  XsX <- rowSums(Xs*Xmat, na.rm=TRUE)
+  XsNorm2 <- sum(Xs^2, na.rm=TRUE)
   ## the normalized version of S
   S <- n^2 * (sum((Yibar - Ybar -(Xibar - Xbar)*beta.yx)^2) + sum((XiYibar -Ybar*Xibar -(Xi2bar - Xbar*Xibar)*beta.yx)^2)) / var.epsilon
   ## Calculate \| \mathbf{R}_{Z|\mathbf{X}} \|^2
   Projxz.norm2 <- n + XsNorm2 * ( n^2*sum(Xsbar^2) + sum(XsX^2)) + n*sum(Xibar^2)/p
-  Rzx.norm2 <- sum(Xmat^2) + N -Projxz.norm2
+  Rzx.norm2 <- sum(Xmat^2, na.rm=TRUE) + N -Projxz.norm2
   ## General terms; without n^4 yet.
   S1 <- sum(Xibar^2); S2 <- sum(Xsbar^2); S3 <- sum(XsX^2)/n^2
   ZPZ.norm2 <- p^2/N^2 + S2^2 + 2*( p*S1/N^2 + S2*S3) + S1^2/N^2 + 2*(sum(Xibar*XsX)^2)/(N*n^2) + S3^2
   ## subtractions; to multiply by *n^4
   Minus.terms <- sum((1/N + Xsbar^2)^2) + 2*sum((Xibar/N + Xsbar*XsX/n)^2) + sum((Xibar^2/N + XsX^2/n^2)^2)
   ## added terms
-  XiNorm2 <- rowSums(Xmat^2)
+  XiNorm2 <- rowSums(Xmat^2, na.rm=TRUE)
   Add.terms <- sum((1/n -1/N -Xsbar^2)^2) + 2*sum((Xibar/n -Xibar/N -Xsbar*XsX/n)^2) + sum((XiNorm2/n^2 -Xibar^2/N -XsX^2/n^2)^2)
   ZRzx.norm2 <- n^4*(ZPZ.norm2 - Minus.terms + Add.terms)
   ## Estimate lambda based on Moment matching
@@ -105,15 +124,13 @@ flmer <- function(Xmat, Ymat){
   betamat <- t(rbind(gamma0hat, gamma1hat) + betahat)
   colnames(betamat) <- c("Intercept", "Slope")
   ## t-statistics for the fixed effects
-  t.fixed <- betahat/sqrt(diag(covBeta))
+  t.fixed <- betahat/sqrt(pmax(diag(covBeta), min.var))
   ## the predicted Yhat
   Yhat <- Xmat * betamat[, "Slope"] + betamat[, "Intercept"]
   return(list(betahat=betahat, betamat=betamat, Yhat=Yhat,
               lambdahat=lambdahat, var.epsilon=var.epsilon,
               covBeta=covBeta, t.fixed=t.fixed))
 }
-
-
 
 ## Implement the covariance transformed FLMER as follows.
 #'Match-MixeR
@@ -146,8 +163,8 @@ MM <- function(Xmat, Ymat){
   t.fixed <- betahat/sqrt(diag(covBeta))
   return(list(betahat=betahat, betamat=betamat, Yhat=Yhat,
               lambdahat=lambdahat, var.epsilon=var.epsilon,
-              covGamma <- covGamma,
-              covBeta=covBeta, t.fixed=t.fixed))
+              covGamma=covGamma, covBeta=covBeta, t.fixed=t.fixed,
+              varx=rr1$VarX, problematic.genes=rr1$problematic.genes))
 }
 
 
