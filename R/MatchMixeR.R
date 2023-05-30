@@ -164,6 +164,7 @@ MM <- function(Xmat, Ymat){
   t.fixed <- betahat/sqrt(diag(covBeta))
   return(list(betahat=betahat, betamat=betamat, Yhat=Yhat,
               lambdahat=lambdahat, var.epsilon=var.epsilon,
+              var.explained.prop=rr1$var.explained.prop,
               covGamma=covGamma, covBeta=covBeta, t.fixed=t.fixed,
               varx=rr1$VarX, problematic.genes=rr1$problematic.genes))
 }
